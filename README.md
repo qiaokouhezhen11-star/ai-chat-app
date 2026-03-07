@@ -37,12 +37,3 @@ ChatGPTのようなUI/UXを目指したAIチャットアプリです。
 
 ```env
 OPENAI_API_KEY=your_key_here
-
----
-
-## Getting Started (Local)
-
-### 1) Install
-```bash
-cd apps/web
-npm install --legacy-peer-deps
