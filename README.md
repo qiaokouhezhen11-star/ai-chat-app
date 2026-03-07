@@ -40,9 +40,11 @@ ChatGPTのようなUI/UXを目指したAIチャットアプリです。
 OPENAI_API_KEY=your_key_here
 ```
 ```text
+## Project Structure (main)
 /apps/web/src/app/chat/page.jsx                 # チャット画面（UI本体：表示・入力・送信）
 /apps/web/src/app/api/chat/route.js             # チャットAPI（/api/chat：OpenAIへ送信）
 /apps/web/src/utils/useHandleStreamResponse.js  # ストリーミング処理（返答を少しずつ表示）
 /apps/web/src/utils/useAuth.js                  # 認証関連（今後使う/拡張用）
 /apps/web/src/utils/useUpload.js                # アップロード関連（今後使う/拡張用）
+```
 
