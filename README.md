@@ -1,3 +1,5 @@
+![AI Chat App Screenshot](docs/screenshot.png)
+
 # AI Chat App (ChatGPT-like UI)
 
 ChatGPTのようなUI/UXを目指したAIチャットアプリです。  
