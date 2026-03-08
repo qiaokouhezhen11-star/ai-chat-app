@@ -1,3 +1,5 @@
+React + Vite を用いて、ChatGPT風のUI/UXを意識したAIチャットアプリを作成しました。  
+ストリーミング応答、自動スクロール、IME対応、エラーハンドリングなど、実際の利用を意識したチャット体験の実装に取り組みました。
 
 # AI Chat App (ChatGPT-like UI)
 
