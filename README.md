@@ -20,8 +20,6 @@ ChatGPTのようなUI/UXを目指したAIチャットアプリです。
 ## Demo
 - Local: `http://localhost:4000/chat`
 
-（ここにスクリーンショットやGIFを後で追加予定）
-
 ---
 
 ## Features
