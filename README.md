@@ -1,4 +1,3 @@
-![AI Chat App Screenshot](docs/screenshot.png)
 
 # AI Chat App (ChatGPT-like UI)
 
@@ -14,6 +13,9 @@ ChatGPTのようなUI/UXを目指したAIチャットアプリです。
 - エラーハンドリング
 - IME（日本語変換）対応
 - ChatGPT風のUIレイアウト
+
+## スクリーンショット 
+![AI Chat App Screenshot](docs/screenshot.png)
 
 ## Demo
 - Local: `http://localhost:4000/chat`
