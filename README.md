@@ -31,13 +31,12 @@ ChatGPTのようなUI/UXを目指したAIチャットアプリです。
 
 ---
 
-## Tech Stack
-- Frontend: React + Vite（react-router dev）
+## 使用技術
+- フロントエンド: React + Vite
 - UI: Tailwind CSS / lucide-react
-- Backend: `/api/chat` 経由でAIへ接続（ストリーミング対応）
-- Markdown: react-markdown + remark-gfm
+- バックエンド: `/api/chat` 経由でAIへ接続
+- テキスト表示: react-markdown + remark-gfm
 
----
 ---
 
 ## Environment Variables
