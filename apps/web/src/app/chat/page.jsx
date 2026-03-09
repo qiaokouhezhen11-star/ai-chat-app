@@ -280,6 +280,7 @@ setStreamingMessage("");
     if (
       window.confirm("新しいチャットを開始しますか？現在の会話は削除されます。")
     ) {
+      localStorage.removeItem(STORAGE_KEY);
       setMessages([]);
       setStreamingMessage("");
       setIsStreaming(false);
