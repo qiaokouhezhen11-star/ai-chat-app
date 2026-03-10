@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 
 export default function ChatPage() {
   const STORAGE_KEY = "ai_chat_messages_v1";
+  const MODEL_STORAGE_KEY = "ai_chat_selected_model_v1";
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -28,7 +29,14 @@ export default function ChatPage() {
 
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try {
+      const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
+      return savedModel || "gpt-4o-mini";
+    } catch {
+      return "gpt-4o-mini";
+    }
+  });
   const [isComposing, setIsComposing] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState("");
   const [isOnline, setIsOnline] = useState(true);
@@ -69,6 +77,14 @@ export default function ChatPage() {
       console.error("履歴の保存に失敗しました:", error);
     }
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+    } catch (error) {
+      console.error("モデル設定の保存に失敗しました:", error);
+    }
+  }, [selectedModel]);
 
   // 自動スクロール
   const scrollToBottom = useCallback((smooth = true) => {
