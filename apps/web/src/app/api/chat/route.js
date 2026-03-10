@@ -12,6 +12,11 @@ export async function POST(request) {
 
     const cleanMessages = Array.isArray(body?.messages) ? body.messages : [];
 
+    const selectedModel =
+      typeof body?.model === "string" && body.model.trim()
+       ? body.model.trim()
+       : "gpt-4o-mini";
+
     const systemMessage = {
       role: "system",
       content:
@@ -26,7 +31,7 @@ export async function POST(request) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: selectedModel,
         messages: [systemMessage, ...cleanMessages],
         stream: true,
       }),

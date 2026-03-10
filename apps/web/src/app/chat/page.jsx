@@ -1,16 +1,16 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
+import useHandleStreamResponse from "@/utils/useHandleStreamResponse";
 import {
-  Send,
+  AlertCircle,
+  ChevronDown,
   Plus,
   RotateCcw,
-  ChevronDown,
-  AlertCircle,
+  Send,
+  Square,
   Wifi,
   WifiOff,
-  Square,
 } from "lucide-react";
-import useHandleStreamResponse from "@/utils/useHandleStreamResponse";
+import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 export default function ChatPage() {
@@ -28,13 +28,14 @@ export default function ChatPage() {
 
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [isComposing, setIsComposing] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState("");
   const [isOnline, setIsOnline] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
-  
+
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -47,7 +48,7 @@ export default function ChatPage() {
 
   // オンライン/オフライン検出
   useEffect(() => {
-    
+
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -60,14 +61,14 @@ export default function ChatPage() {
     };
   }, []);
 
- // messages が変わるたびに履歴を保存
-    useEffect(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-      } catch (error) {
-        console.error("履歴の保存に失敗しました:", error);
-      }
-    }, [messages]);
+  // messages が変わるたびに履歴を保存
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch (error) {
+      console.error("履歴の保存に失敗しました:", error);
+    }
+  }, [messages]);
 
   // 自動スクロール
   const scrollToBottom = useCallback((smooth = true) => {
@@ -106,39 +107,39 @@ export default function ChatPage() {
   }, []);
 
   // ストリーミング処理（完了時）
-const handleFinish = useCallback((message) => {
-  // 空なら追加しない（空欄バブル対策）
-  if (!message || !message.trim()) {
+  const handleFinish = useCallback((message) => {
+    // 空なら追加しない（空欄バブル対策）
+    if (!message || !message.trim()) {
+      setStreamingMessage("");
+      setIsStreaming(false);
+      return;
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: message,
+        status: "done",
+        timestamp: new Date().toLocaleTimeString("ja-JP", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      },
+    ]);
+
     setStreamingMessage("");
     setIsStreaming(false);
-    return;
-  }
+  }, []);
 
-  setMessages((prev) => [
-    ...prev,
-    {
-      role: "assistant",
-      content: message,
-      status: "done",
-      timestamp: new Date().toLocaleTimeString("ja-JP", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+  const handleStreamResponse = useHandleStreamResponse({
+    onChunk: (content) => {
+      setStreamingMessage(content);
     },
-  ]);
-
-  setStreamingMessage("");
-  setIsStreaming(false);
-}, []);
-
-const handleStreamResponse = useHandleStreamResponse({
-  onChunk: (content) => {
-    setStreamingMessage(content);
-  },
-  onFinish: (finalText) => {
-    handleFinish(finalText);
-  },
-});
+    onFinish: (finalText) => {
+      handleFinish(finalText);
+    },
+  });
 
   // メッセージ送信
   const handleSendMessage = useCallback(async () => {
@@ -182,11 +183,12 @@ const handleStreamResponse = useHandleStreamResponse({
         role: m.role,
         content: m.content,
       }));
-      
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: selectedModel,
           messages: requestMessages,
           stream: true,
         }),
@@ -199,7 +201,7 @@ const handleStreamResponse = useHandleStreamResponse({
 
       await handleStreamResponse(response);
 
-setStreamingMessage("");
+      setStreamingMessage("");
     } catch (error) {
       console.error("Send message error:", error);
 
@@ -235,8 +237,8 @@ setStreamingMessage("");
       setIsStreaming(false);
       // ★ここ：成功/失敗どちらでも必ず戻す
     }
-      
-    }, [
+
+  }, [
     inputText,
     isOverLimit,
     isOnline,
@@ -244,7 +246,7 @@ setStreamingMessage("");
     messages,
     handleStreamResponse,
     streamingMessage,
-    ]);
+  ]);
 
   // 再送
   const handleRetry = useCallback(
@@ -329,14 +331,35 @@ setStreamingMessage("");
           </h1>
         </div>
 
-        <button
-          onClick={handleNewChat}
-          className="flex items-center gap-2 px-3 md:px-4 py-2 bg-gradient-to-b from-[#252528] to-[#1E1E21] rounded-lg border border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D] transition-all duration-200 text-sm md:text-base"
-          aria-label="新規チャット"
-        >
-          <Plus size={16} strokeWidth={2} />
-          <span className="hidden md:inline">新規チャット</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="model-select"
+              className="text-sm text-[#B4B4B8] font-poppins"
+            >
+              モデル
+            </label>
+            <select
+              id="model-select"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              disabled={isStreaming}
+              className="px-3 py-2 bg-[#1F1F26] border border-[#353538] rounded-lg text-white text-sm font-poppins focus:outline-none focus:border-[#614BFF]"
+            >
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+            </select>
+          </div>
+
+          <button
+            onClick={handleNewChat}
+            className="flex items-center gap-2 px-3 md:px-4 py-2 bg-gradient-to-b from-[#252528] to-[#1E1E21] rounded-lg border border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D] transition-all duration-200 text-sm md:text-base"
+            aria-label="新規チャット"
+          >
+            <Plus size={16} strokeWidth={2} />
+            <span className="hidden md:inline">新規チャット</span>
+          </button>
+        </div>
       </div>
 
       {/* メッセージエリア */}
@@ -396,67 +419,66 @@ setStreamingMessage("");
 
               {/* メッセージバブル */}
               <div
-                className={`px-4 py-3 rounded-2xl font-poppins text-sm md:text-base leading-relaxed ${
-                  message.role === "user"
-                    ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white"
-                    : "bg-[#1F1F26] text-white border border-[#353538]"
-                }`}
+                className={`px-4 py-3 rounded-2xl font-poppins text-sm md:text-base leading-relaxed ${message.role === "user"
+                  ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white"
+                  : "bg-[#1F1F26] text-white border border-[#353538]"
+                  }`}
               >
-            <div className="break-words">
-            <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-              components={{
-                // インラインコードは code() で整形
-                code({ inline, children, ...props }) {
-                  if (inline) {
-                    return (
-                      <code
-                        className="px-1 py-0.5 rounded bg-[#262630] text-[#E6E6E8]"
-                        {...props}
-                      >
-                        {children}
-                      </code>
-                    );
-                  }
-                  // ブロックコードは pre() 側で包むので、ここでは素の code を返す
-                  return <code {...props}>{children}</code>;
-                },
+                <div className="break-words">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // インラインコードは code() で整形
+                      code({ inline, children, ...props }) {
+                        if (inline) {
+                          return (
+                            <code
+                              className="px-1 py-0.5 rounded bg-[#262630] text-[#E6E6E8]"
+                              {...props}
+                            >
+                              {children}
+                            </code>
+                          );
+                        }
+                        // ブロックコードは pre() 側で包むので、ここでは素の code を返す
+                        return <code {...props}>{children}</code>;
+                      },
 
-                // コードブロック（``` ```）は pre() が呼ばれるので、ここでコピーUIを付ける
-                pre({ children }) {
-                  // children は <code>…</code> が入ってくる想定
-                  const codeText =
-                    (children?.props?.children && String(children.props.children).replace(/\n$/, "")) ||
-                    "";
+                      // コードブロック（``` ```）は pre() が呼ばれるので、ここでコピーUIを付ける
+                      pre({ children }) {
+                        // children は <code>…</code> が入ってくる想定
+                        const codeText =
+                          (children?.props?.children && String(children.props.children).replace(/\n$/, "")) ||
+                          "";
 
-                  return (
-                    <div className="mt-2 rounded-lg bg-[#0F0F14] border border-[#353538] overflow-hidden">
-                      <div className="flex items-center justify-end px-2 py-2 border-b border-[#353538]">
-                        <button
-                          type="button"
-                          className="text-xs px-2 py-1 rounded bg-[#262630] hover:bg-[#303040] text-white"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(codeText);
-                            } catch (e) {
-                              console.error("copy failed", e);
-                            }
-                          }}
-                        >
-                          コピー
-                        </button>
-                      </div>
+                        return (
+                          <div className="mt-2 rounded-lg bg-[#0F0F14] border border-[#353538] overflow-hidden">
+                            <div className="flex items-center justify-end px-2 py-2 border-b border-[#353538]">
+                              <button
+                                type="button"
+                                className="text-xs px-2 py-1 rounded bg-[#262630] hover:bg-[#303040] text-white"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(codeText);
+                                  } catch (e) {
+                                    console.error("copy failed", e);
+                                  }
+                                }}
+                              >
+                                コピー
+                              </button>
+                            </div>
 
-                      <pre className="p-3 overflow-x-auto">
-                        {children}
-                      </pre>
-                    </div>
-                  );
-                },
-              }}
-            >
-              {message.content || ""}
-</ReactMarkdown>            </div>   
+                            <pre className="p-3 overflow-x-auto">
+                              {children}
+                            </pre>
+                          </div>
+                        );
+                      },
+                    }}
+                  >
+                    {message.content || ""}
+                  </ReactMarkdown>            </div>
                 {message.stopped && (
                   <div className="mt-2 pt-2 border-t border-[#353538] text-xs text-[#8B8B90] italic">
                     途中で停止されました
@@ -609,11 +631,10 @@ setStreamingMessage("");
                   <button
                     onClick={handleSendMessage}
                     disabled={!inputText.trim() || isOverLimit || !isOnline}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-poppins font-semibold text-sm transition-all duration-200 ${
-                      inputText.trim() && !isOverLimit && isOnline
-                        ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white hover:from-[#553DE8] hover:to-[#7352E8] active:from-[#4B35CC] active:to-[#6442CC]"
-                        : "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
-                    }`}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-poppins font-semibold text-sm transition-all duration-200 ${inputText.trim() && !isOverLimit && isOnline
+                      ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white hover:from-[#553DE8] hover:to-[#7352E8] active:from-[#4B35CC] active:to-[#6442CC]"
+                      : "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
+                      }`}
                   >
                     <Send size={14} />
                     <span>送信</span>
