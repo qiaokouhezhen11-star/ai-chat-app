@@ -158,6 +158,14 @@ export default function ChatPage() {
     },
   });
 
+  const handleClearFile = useCallback(() => {
+    setSelectedFile(null);
+  
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
   // メッセージ送信
   const handleSendMessage = useCallback(async () => {
     if (!inputText.trim() || isOverLimit || !isOnline || isStreaming) return;
@@ -201,14 +209,18 @@ export default function ChatPage() {
         content: m.content,
       }));
 
+      const formData = new FormData();
+      formData.append("model", selectedModel);
+      formData.append("messages", JSON.stringify(requestMessages));
+      formData.append("stream", "true");
+
+      if (selectedFile) {
+        formData.append("file", selectedFile);
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: requestMessages,
-          stream: true,
-        }),
+        body: formData,
         signal: abortControllerRef.current.signal,
       });
 
@@ -219,6 +231,7 @@ export default function ChatPage() {
       await handleStreamResponse(response);
 
       setStreamingMessage("");
+      handleClearFile();
     } catch (error) {
       console.error("Send message error:", error);
 
@@ -263,6 +276,7 @@ export default function ChatPage() {
     messages,
     handleStreamResponse,
     streamingMessage,
+    handleClearFile,
   ]);
 
   // 再送
@@ -304,14 +318,6 @@ export default function ChatPage() {
       setStreamingMessage("");
       setIsStreaming(false);
       setInputText("");
-    }
-  }, []);
-
-  const handleClearFile = useCallback(() => {
-    setSelectedFile(null);
-  
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
     }
   }, []);
 

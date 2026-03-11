@@ -1,6 +1,23 @@
 export async function POST(request) {
   try {
-    const body = await request.json();
+    const formData = await request.formData();
+
+    const rawMessages = formData.get("messages");
+    const rawModel = formData.get("model");
+    const uploadedFile = formData.get("file");
+
+    let cleanMessages = [];
+    try {
+      const parsedMessages = JSON.parse(rawMessages || "[]");
+      cleanMessages = Array.isArray(parsedMessages) ? parsedMessages : [];
+    } catch {
+      cleanMessages = [];
+    }
+
+    const selectedModel =
+      typeof rawModel === "string" && rawModel.trim()
+        ? rawModel.trim()
+        : "gpt-4o-mini";
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -10,18 +27,31 @@ export async function POST(request) {
       );
     }
 
-    const cleanMessages = Array.isArray(body?.messages) ? body.messages : [];
+   let fileContext = "";
 
-    const selectedModel =
-      typeof body?.model === "string" && body.model.trim()
-       ? body.model.trim()
-       : "gpt-4o-mini";
+   if (uploadedFile && typeof uploadedFile.text === "function") {
+    const fileType = uploadedFile.type || "";
+    const fileName = uploadedFile.name || "";
 
-    const systemMessage = {
-      role: "system",
-      content:
-        "あなたは優秀なAIエンジニアです。初心者にもわかりやすく日本語で、手順を1つずつ提示して支援してください。コマンドやコードはコピペで実行できる形で出してください。エラーが出たら原因の切り分けから案内してください。",
-    };
+    const isTextFile =
+       fileType.startsWith("text/") ||
+       fileName.endsWith(".txt") ||
+       fileName.endsWith(".md");
+
+    if (isTextFile) {
+       const fileText = await uploadedFile.text();
+       fileContext = fileText.slice(0, 8000);
+     }
+   }
+
+   const systemMessage = {
+     role: "system",
+     content:
+       "あなたは優秀なAIエンジニアです。初心者にもわかりやすく日本語で、手順を1つずつ提示して支援してください。コマンドやコードはコピペで実行できる形で出してください。エラーが出たら原因の切り分けから案内してください。" +
+       (fileContext
+         ? `\n\n以下はユーザーがアップロードしたファイル内容です。必要に応じて参考にしてください。\n\n${fileContext}`
+         : ""),
+   };
 
     // OpenAI（SSEで返ってくる）
     const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
