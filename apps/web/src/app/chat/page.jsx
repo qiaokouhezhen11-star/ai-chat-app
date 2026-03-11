@@ -29,6 +29,7 @@ export default function ChatPage() {
 
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
   const [selectedModel, setSelectedModel] = useState(() => {
     try {
       const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -48,7 +49,7 @@ export default function ChatPage() {
   const messagesContainerRef = useRef(null);
   const abortControllerRef = useRef(null);
   const textareaRef = useRef(null);
-
+  const fileInputRef = useRef(null);
 
   const MAX_CHARS = 10000;
   const charCount = inputText.length;
@@ -589,6 +590,12 @@ export default function ChatPage() {
             </div>
           )}
 
+          {selectedFile && (
+            <div className="mb-3 text-sm text-[#B4B4B8] font-poppins">
+              選択中: {selectedFile.name}
+            </div>
+          )}
+
           <div className="bg-[#262630] border border-[#353538] rounded-xl p-3 md:p-4">
             <textarea
               ref={textareaRef}
@@ -644,6 +651,25 @@ export default function ChatPage() {
                     <span>停止</span>
                   </button>
                 ) : (
+                  <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                      setSelectedFile(file);
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1F1F26] border border-[#353538] rounded-lg text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D] transition-all duration-200 text-sm font-poppins"
+                  >
+                    ファイル選択
+                  </button>
+
                   <button
                     onClick={handleSendMessage}
                     disabled={!inputText.trim() || isOverLimit || !isOnline}
@@ -655,7 +681,8 @@ export default function ChatPage() {
                     <Send size={14} />
                     <span>送信</span>
                   </button>
-                )}
+                </>
+              )}
               </div>
             </div>
           </div>
