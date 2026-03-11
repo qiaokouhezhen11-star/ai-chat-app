@@ -307,6 +307,14 @@ export default function ChatPage() {
     }
   }, []);
 
+  const handleClearFile = useCallback(() => {
+    setSelectedFile(null);
+  
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
   // Enter送信、Shift+Enter改行
   const handleKeyDown = useCallback(
     (e) => {
@@ -591,8 +599,15 @@ export default function ChatPage() {
           )}
 
           {selectedFile && (
-            <div className="mb-3 text-sm text-[#B4B4B8] font-poppins">
-              選択中: {selectedFile.name}
+            <div className="mb-3 flex items-center gap-3 text-sm text-[#B4B4B8] font-poppins">
+              <span>選択中: {selectedFile.name}</span>
+              <button
+                type="button"
+                onClick={handleClearFile}
+                className="px-2 py-1 text-xs rounded-md border border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] transition-all duration-200"
+              >
+                クリア
+              </button>
             </div>
           )}
 
