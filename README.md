@@ -114,3 +114,5 @@ apps/web/src/
 ├─ utils/
 │  ├─ fileDisplay.js
 │  └─ useHandleStreamResponse.js
+└─ components/
+   └─ ...
