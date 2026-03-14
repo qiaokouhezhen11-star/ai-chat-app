@@ -116,7 +116,3 @@ apps/web/src/
 │  ├─ fileDisplay.js
 │  └─ useHandleStreamResponse.js
 └─ components/
-   ├─ ChatHeader.jsx
-   ├─ ChatInput.jsx
-   ├─ MessageList.jsx
-   └─ MessageItem.jsx
