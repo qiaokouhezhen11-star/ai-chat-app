@@ -12,10 +12,17 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ACCEPTED_FILE_TYPES } from "@/constants/fileUpload";
+import {
+  formatFileSize,
+  getFileBadgeClassName,
+} from "@/utils/fileDisplay";
+import useChatFileInput from "@/hooks/useChatFileInput";
 
 export default function ChatPage() {
   const STORAGE_KEY = "ai_chat_messages_v1";
   const MODEL_STORAGE_KEY = "ai_chat_selected_model_v1";
+
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -30,6 +37,15 @@ export default function ChatPage() {
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadError, setUploadError] = useState("");
+  const {
+    fileInputRef,
+    handleClearFile,
+    handleFileChange,
+  } = useChatFileInput({
+    setSelectedFile,
+    setUploadError,
+  });
   const [selectedModel, setSelectedModel] = useState(() => {
     try {
       const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -49,11 +65,13 @@ export default function ChatPage() {
   const messagesContainerRef = useRef(null);
   const abortControllerRef = useRef(null);
   const textareaRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const streamingMessageRef = useRef("");
 
   const MAX_CHARS = 10000;
+  
   const charCount = inputText.length;
   const isOverLimit = charCount > MAX_CHARS;
+  const canSend = (!!inputText.trim() || !!selectedFile) && !isOverLimit && !isStreaming && isOnline;
 
   // オンライン/オフライン検出
   useEffect(() => {
@@ -124,33 +142,37 @@ export default function ChatPage() {
   }, []);
 
   // ストリーミング処理（完了時）
-  const handleFinish = useCallback((message) => {
-    // 空なら追加しない（空欄バブル対策）
-    if (!message || !message.trim()) {
-      setStreamingMessage("");
-      setIsStreaming(false);
-      return;
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: message,
-        status: "done",
-        timestamp: new Date().toLocaleTimeString("ja-JP", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    ]);
-
+  // ストリーミング処理（完了時）
+const handleFinish = useCallback((message) => {
+  // 空なら追加しない（空欄バブル対策）
+  if (!message || !message.trim()) {
+    streamingMessageRef.current = "";
     setStreamingMessage("");
     setIsStreaming(false);
-  }, []);
+    return;
+  }
+
+  setMessages((prev) => [
+    ...prev,
+    {
+      role: "assistant",
+      content: message,
+      status: "done",
+      timestamp: new Date().toLocaleTimeString("ja-JP", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    },
+  ]);
+
+  streamingMessageRef.current = "";
+  setStreamingMessage("");
+  setIsStreaming(false);
+}, []);
 
   const handleStreamResponse = useHandleStreamResponse({
     onChunk: (content) => {
+      streamingMessageRef.current = content;
       setStreamingMessage(content);
     },
     onFinish: (finalText) => {
@@ -158,140 +180,171 @@ export default function ChatPage() {
     },
   });
 
-  const handleClearFile = useCallback(() => {
-    setSelectedFile(null);
-  
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }, []);
-
-  // メッセージ送信
-  const handleSendMessage = useCallback(async () => {
-    if (!inputText.trim() || isOverLimit || !isOnline || isStreaming) return;
-
-    const userMessage = {
+  const createUserMessage = useCallback((text, file) => {
+    return {
       role: "user",
-      content: inputText.trim(),
+      content: text.trim() || "ファイルを送信しました",
       status: "sending",
       timestamp: new Date().toLocaleTimeString("ja-JP", {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      fileName: file ? file.name : "",
+      fileSize: file ? file.size : 0,
     };
+  }, []);
 
-    // 楽観的UI更新
-    userMessage.role = "user";
-    setMessages((prev) => [...prev, userMessage]);
-    setInputText("");
+  // メッセージ送信
+  const handleSendMessage = useCallback(
+    async (overrideText) => {
+      const textToSend =
+        typeof overrideText === "string" ? overrideText : inputText;
 
-    // フォーカス維持
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
+      setUploadError("");
 
-    try {
-      // メッセージを送信済みに更新
-      setMessages((prev) =>
-        prev.map((msg, idx) =>
-          idx === prev.length - 1 ? { ...msg, status: "done" } : msg,
-        ),
-      );
-
-      setIsStreaming(true);
-      abortControllerRef.current = new AbortController();
-
-      const requestMessages = [
-        ...messages.filter((m) => m.status === "done"),
-        userMessage,
-      ].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const formData = new FormData();
-      formData.append("model", selectedModel);
-      formData.append("messages", JSON.stringify(requestMessages));
-      formData.append("stream", "true");
-
-      if (selectedFile) {
-        formData.append("file", selectedFile);
+      if (isOverLimit || isStreaming) {
+        return;
       }
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        body: formData,
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (!isOnline) {
+        setUploadError("オフラインです。インターネット接続を確認してください。");
+        return;
       }
 
-      await handleStreamResponse(response);
-
-      setStreamingMessage("");
-      handleClearFile();
-    } catch (error) {
-      console.error("Send message error:", error);
-
-      if (error.name === "AbortError") {
-        // ユーザーによる停止
-        if (streamingMessage) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: streamingMessage,
-              status: "done",
-              stopped: true,
-              timestamp: new Date().toLocaleTimeString("ja-JP", {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
-            },
-          ]);
-        }
-        setStreamingMessage("");
-      } else {
-        // エラー発生
+      if (!textToSend.trim() && !selectedFile) {
+        return;
+      }
+  
+      const userMessage = createUserMessage(textToSend, selectedFile);
+  
+      setMessages((prev) => [...prev, userMessage]);
+  
+      if (typeof overrideText !== "string") {
+        setInputText("");
+      }
+  
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+  
+      try {
         setMessages((prev) =>
           prev.map((msg, idx) =>
-            idx === prev.length - 1
-              ? { ...msg, status: "failed", error: error.message }
-              : msg,
-          ),
+            idx === prev.length - 1 ? { ...msg, status: "done" } : msg
+          )
         );
+  
+        setIsStreaming(true);
+        abortControllerRef.current = new AbortController();
+  
+        const requestMessages = [
+          ...messages.filter((m) => m.status === "done"),
+          userMessage,
+        ].map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+  
+        const formData = new FormData();
+        formData.append("model", selectedModel);
+        formData.append("messages", JSON.stringify(requestMessages));
+        formData.append("stream", "true");
+  
+        if (selectedFile) {
+          formData.append("file", selectedFile);
+        }
+  
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          body: formData,
+          signal: abortControllerRef.current.signal,
+        });
+  
+        if (!response.ok) {
+          let errorMessage = `HTTP error! status: ${response.status}`;
+  
+          try {
+            const errorData = await response.json();
+            if (errorData?.error) {
+              errorMessage = errorData.error;
+            }
+          } catch {
+            // JSONで読めないときは既定メッセージのまま
+          }
+  
+          throw new Error(errorMessage);
+        }
+  
+        await handleStreamResponse(response);
+  
+        setStreamingMessage("");
+        handleClearFile();
+      } catch (error) {
+        console.error("Send message error:", error);
+  
+        if (error.name === "AbortError") {
+          const stoppedMessage = streamingMessageRef.current;
+        
+          if (stoppedMessage && stoppedMessage.trim()) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: stoppedMessage,
+                status: "done",
+                stopped: true,
+                timestamp: new Date().toLocaleTimeString("ja-JP", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              },
+            ]);
+          }
+        
+          streamingMessageRef.current = "";
+          setStreamingMessage("");
+        }
+        else {
+          setUploadError(error.message);
+          setMessages((prev) =>
+            prev.map((msg, idx) =>
+              idx === prev.length - 1
+                ? { ...msg, status: "failed", error: error.message }
+                : msg
+            )
+          );
+        }
+      } finally {
+        abortControllerRef.current = null;
+        setIsStreaming(false);
       }
-    } finally {
-      setIsStreaming(false);
-      // ★ここ：成功/失敗どちらでも必ず戻す
-    }
-
-  }, [
-    inputText,
-    isOverLimit,
-    isOnline,
-    isStreaming,
-    messages,
-    handleStreamResponse,
-    streamingMessage,
-    handleClearFile,
-  ]);
+    },
+    [
+      inputText,
+      isOverLimit,
+      isOnline,
+      isStreaming,
+      messages,
+      selectedModel,
+      selectedFile,
+      handleStreamResponse,
+      streamingMessage,
+      handleClearFile,
+      createUserMessage,
+    ]
+  );
 
   // 再送
   const handleRetry = useCallback(
     (messageIndex) => {
       const failedMessage = messages[messageIndex];
-      if (failedMessage.role !== "user" || failedMessage.status !== "failed")
+  
+      if (failedMessage.role !== "user" || failedMessage.status !== "failed") {
         return;
-
-      setInputText(failedMessage.content);
+      }
+  
       setMessages((prev) => prev.filter((_, idx) => idx !== messageIndex));
-
-      setTimeout(() => {
-        handleSendMessage();
-      }, 100);
+      handleSendMessage(failedMessage.content);
     },
     [messages, handleSendMessage],
   );
@@ -305,6 +358,7 @@ export default function ChatPage() {
   const handleStopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
   }, []);
 
@@ -313,24 +367,20 @@ export default function ChatPage() {
     if (
       window.confirm("新しいチャットを開始しますか？現在の会話は削除されます。")
     ) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+  
       localStorage.removeItem(STORAGE_KEY);
       setMessages([]);
+      streamingMessageRef.current = "";
       setStreamingMessage("");
       setIsStreaming(false);
       setInputText("");
+      handleClearFile();
     }
-  }, []);
-
-  // Enter送信、Shift+Enter改行
-  const handleKeyDown = useCallback(
-    (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSendMessage();
-      }
-    },
-    [handleSendMessage],
-  );
+  }, [STORAGE_KEY, handleClearFile]);
 
   // テキストエリア自動リサイズ
   useEffect(() => {
@@ -384,7 +434,12 @@ export default function ChatPage() {
 
           <button
             onClick={handleNewChat}
-            className="flex items-center gap-2 px-3 md:px-4 py-2 bg-gradient-to-b from-[#252528] to-[#1E1E21] rounded-lg border border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D] transition-all duration-200 text-sm md:text-base"
+            disabled={isStreaming}
+            className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg border transition-all duration-200 text-sm md:text-base ${
+              isStreaming
+                ? "bg-[#2A2A36] border-[#353538] text-[#67676D] cursor-not-allowed opacity-40"
+                : "bg-gradient-to-b from-[#252528] to-[#1E1E21] border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D]"
+            }`}
             aria-label="新規チャット"
           >
             <Plus size={16} strokeWidth={2} />
@@ -415,7 +470,12 @@ export default function ChatPage() {
                 (suggestion, idx) => (
                   <button
                     key={idx}
-                    onClick={() => setInputText(suggestion + "をお願いします")}
+                    onClick={() => {
+                      setInputText(suggestion + "をお願いします");
+                      if (uploadError) {
+                        setUploadError("");
+                      }
+                    }}
                     className="px-4 py-2 bg-[#1F1F26] border border-[#353538] rounded-lg text-[#F4F4F5] hover:bg-[#2E2E31] hover:border-[#614BFF] active:bg-[#1A1A1D] transition-all duration-200 text-sm font-poppins"
                   >
                     {suggestion}
@@ -509,7 +569,23 @@ export default function ChatPage() {
                     }}
                   >
                     {message.content || ""}
-                  </ReactMarkdown>            </div>
+                  </ReactMarkdown>
+                  {message.role === "user" && message.fileName && (
+                  <div className="mt-3 pt-3 border-t border-white border-opacity-20">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-white text-opacity-90">
+                    <span
+                      className={`rounded-md px-2 py-1 ${getFileBadgeClassName(message.fileName)}`}
+                    >
+                      {message.fileName.split(".").pop()?.toUpperCase() || "FILE"}
+                    </span>
+                      <span className="break-all">{message.fileName}</span>
+                      <span className="text-white text-opacity-70">
+                        {formatFileSize(message.fileSize)}
+                      </span>
+                    </div>
+                  </div>
+                )}        
+                </div>
                 {message.stopped && (
                   <div className="mt-2 pt-2 border-t border-[#353538] text-xs text-[#8B8B90] italic">
                     途中で停止されました
@@ -518,8 +594,13 @@ export default function ChatPage() {
 
                 {/* 状態表示 */}
                 {message.status === "sending" && (
-                  <div className="mt-2 text-xs text-white text-opacity-70">
-                    送信中...
+                  <div className="mt-2 flex items-center gap-2 text-xs text-white text-opacity-70">
+                    <span>送信中...</span>
+                    {message.fileName && (
+                      <span className="rounded-md bg-white bg-opacity-10 px-2 py-1 text-[11px]">
+                        ファイル付き
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -604,9 +685,28 @@ export default function ChatPage() {
             </div>
           )}
 
+          {uploadError && (
+            <div className="mb-2 flex items-center gap-2 text-[#FF5656] text-sm">
+              <AlertCircle size={16} />
+              <span>{uploadError}</span>
+            </div>
+          )}
+
           {selectedFile && (
-            <div className="mb-3 flex items-center gap-3 text-sm text-[#B4B4B8] font-poppins">
-              <span>選択中: {selectedFile.name}</span>
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#353538] bg-[#1F1F26] px-3 py-2 text-sm font-poppins">
+              <div className="flex items-center gap-2 text-[#F4F4F5]">
+              <span
+                className={`rounded-md px-2 py-1 text-xs ${getFileBadgeClassName(selectedFile.name)}`}
+              >
+                {selectedFile.name.split(".").pop()?.toUpperCase() || "FILE"}
+              </span>
+                <span className="break-all">{selectedFile.name}</span>
+              </div>
+
+              <span className="text-xs text-[#8B8B90]">
+                {formatFileSize(selectedFile.size)}
+              </span>
+
               <button
                 type="button"
                 onClick={handleClearFile}
@@ -621,8 +721,18 @@ export default function ChatPage() {
             <textarea
               ref={textareaRef}
               value={inputText}
+              placeholder={
+                selectedFile
+                  ? "必要ならファイルについて質問を書いて送信"
+                  : "メッセージを入力してください"
+              }
               className="w-full bg-transparent text-white resize-none outline-none focus:outline-none"
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                if (uploadError) {
+                  setUploadError("");
+                }
+              }}
               onCompositionStart={() => setIsComposing(true)}
               onCompositionEnd={() => setIsComposing(false)}
               onKeyDown={(e) => {
@@ -676,31 +786,35 @@ export default function ChatPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
+                    accept={ACCEPTED_FILE_TYPES}
                     className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                      setSelectedFile(file);
-                    }}
+                    onChange={handleFileChange}
+                    disabled={isStreaming}
                   />
 
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#1F1F26] border border-[#353538] rounded-lg text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D] transition-all duration-200 text-sm font-poppins"
+                    disabled={isStreaming}
+                    className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-poppins transition-all duration-200 ${
+                      isStreaming
+                        ? "bg-[#2A2A36] border-[#353538] text-[#67676D] cursor-not-allowed opacity-40"
+                        : "bg-[#1F1F26] border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D]"
+                    }`}
                   >
                     ファイル選択
                   </button>
 
                   <button
                     onClick={handleSendMessage}
-                    disabled={!inputText.trim() || isOverLimit || !isOnline}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-poppins font-semibold text-sm transition-all duration-200 ${inputText.trim() && !isOverLimit && isOnline
+                    disabled={!canSend}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-poppins font-semibold text-sm transition-all duration-200 ${canSend
                       ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white hover:from-[#553DE8] hover:to-[#7352E8] active:from-[#4B35CC] active:to-[#6442CC]"
                       : "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
                       }`}
                   >
                     <Send size={14} />
-                    <span>送信</span>
+                    <span>{selectedFile ? "ファイル送信" : "送信"}</span>
                   </button>
                 </>
               )}

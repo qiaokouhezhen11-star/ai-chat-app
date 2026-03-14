@@ -1,3 +1,11 @@
+import {
+  PDF_EXTENSION,
+  PDF_MIME_TYPE,
+  PDF_NOT_SUPPORTED_MESSAGE,
+  TEXT_FILE_EXTENSIONS,
+  UNSUPPORTED_FILE_MESSAGE,
+} from "@/constants/fileUpload";
+
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -32,26 +40,50 @@ export async function POST(request) {
    if (uploadedFile && typeof uploadedFile.text === "function") {
     const fileType = uploadedFile.type || "";
     const fileName = uploadedFile.name || "";
+    const lowerFileName = fileName.toLowerCase();
+  
+    const isTextFile = TEXT_FILE_EXTENSIONS.some((extension) =>
+      lowerFileName.endsWith(extension)
+    );
+  
+    const isPdfFile =
+      fileType === PDF_MIME_TYPE ||
+      lowerFileName.endsWith(PDF_EXTENSION);
+  
+    // PDFはまだ未対応
+    if (isPdfFile) {
+      return Response.json(
+        { error: PDF_NOT_SUPPORTED_MESSAGE },
+        { status: 400 }
+      );
+    }
+  
+    // txt / md 以外は未対応
+    if (!isTextFile) {
+      return Response.json(
+        { error: UNSUPPORTED_FILE_MESSAGE },
+        { status: 400 }
+      );
+    }
+  
+    const fileText = await uploadedFile.text();
+    fileContext = fileText.slice(0, 8000);
+  }
 
-    const isTextFile =
-       fileType.startsWith("text/") ||
-       fileName.endsWith(".txt") ||
-       fileName.endsWith(".md");
-
-    if (isTextFile) {
-       const fileText = await uploadedFile.text();
-       fileContext = fileText.slice(0, 8000);
-     }
-   }
-
-   const systemMessage = {
-     role: "system",
-     content:
-       "あなたは優秀なAIエンジニアです。初心者にもわかりやすく日本語で、手順を1つずつ提示して支援してください。コマンドやコードはコピペで実行できる形で出してください。エラーが出たら原因の切り分けから案内してください。" +
-       (fileContext
-         ? `\n\n以下はユーザーがアップロードしたファイル内容です。必要に応じて参考にしてください。\n\n${fileContext}`
-         : ""),
-   };
+    const systemMessage = {
+      role: "system",
+      content:
+        "あなたは優秀なAIエンジニアです。初心者にもわかりやすく日本語で、手順を1つずつ提示して支援してください。コマンドやコードはコピペで実行できる形で出してください。エラーが出たら原因の切り分けから案内してください。ユーザーがファイルをアップロードしている場合は、ファイルが未アップロードとは言わず、渡されたファイル内容を優先して読んで回答してください。",
+    };
+    
+    const fileMessage = fileContext
+      ? {
+          role: "system",
+          content:
+            "以下はユーザーがアップロードしたファイル内容です。この内容をもとに回答してください。\n\n" +
+            fileContext,
+        }
+      : null;
 
     // OpenAI（SSEで返ってくる）
     const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -62,7 +94,9 @@ export async function POST(request) {
       },
       body: JSON.stringify({
         model: selectedModel,
-        messages: [systemMessage, ...cleanMessages],
+        messages: fileMessage
+          ? [systemMessage, fileMessage, ...cleanMessages]
+          : [systemMessage, ...cleanMessages],
         stream: true,
       }),
       signal: request.signal,
