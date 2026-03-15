@@ -664,20 +664,28 @@ const handleFinish = useCallback((message) => {
 
               {/* 停止後の表示はバブルの外に出す */}
               {message.stopped && (
-                <div className="mt-2 flex items-center gap-3">
-                  <span className="text-xs text-[#8B8B90] italic">
-                    途中で停止されました
+              <div className="mt-3">
+                <div className="inline-flex items-center gap-3 rounded-lg border border-[#3A3A46] bg-[#181821] px-3 py-2 shadow-sm">
+                  <span className="text-xs font-poppins text-[#F3B37A]">
+                    回答を停止しました
                   </span>
+
                   <button
                     type="button"
                     onClick={() => handleRetryStopped(idx)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#614BFF] hover:bg-[#553DE8] active:bg-[#4B35CC] text-white transition-colors duration-200 text-xs"
+                    disabled={isStreaming}
+                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-poppins font-medium transition-all duration-200 ${
+                      isStreaming
+                        ? "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
+                        : "bg-[#614BFF] text-white hover:bg-[#553DE8] active:bg-[#4B35CC]"
+                    }`}
                   >
                     <RotateCcw size={12} />
                     再送
                   </button>
                 </div>
-              )}
+              </div>
+            )}
             </div>
           </div>
         ))}
