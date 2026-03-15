@@ -225,7 +225,7 @@ const handleFinish = useCallback((message) => {
         return;
       }
   
-      // 直前に送った内容を保持しておく
+      // 直前に送った内容を保持（本文 + ファイル）
       lastSubmittedRequestRef.current = {
         text: textToSend,
         file: fileToSend,
@@ -367,13 +367,21 @@ const handleFinish = useCallback((message) => {
   // 停止後の再送
   const handleRetryStopped = useCallback(
     (messageIndex) => {
+      const { text, file } = lastSubmittedRequestRef.current;
+  
+      // まずは直前に保持した本文 + ファイルを優先
+      if (text.trim() || file) {
+        handleSendMessage(text, file);
+        return;
+      }
+  
+      // フォールバック: もし ref が空なら直前の user メッセージ本文だけ再送
       const stoppedMessage = messages[messageIndex];
   
       if (!stoppedMessage || stoppedMessage.role !== "assistant" || !stoppedMessage.stopped) {
         return;
       }
   
-      // 停止メッセージの直前にある user メッセージを探す
       for (let i = messageIndex - 1; i >= 0; i -= 1) {
         const prevMessage = messages[i];
   
