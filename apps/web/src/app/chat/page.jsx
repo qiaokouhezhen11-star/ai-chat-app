@@ -5,6 +5,7 @@ import {
   Plus,
   RotateCcw,
   Send,
+  Sparkles,
   Square,
   Wifi,
   WifiOff,
@@ -70,6 +71,7 @@ export default function ChatPage() {
     text: "",
     file: null,
   });
+  const lastStoppedAssistantMessageRef = useRef("");
 
   const MAX_CHARS = 10000;
   
@@ -302,8 +304,10 @@ const handleFinish = useCallback((message) => {
   
         if (error.name === "AbortError") {
           const stoppedMessage = streamingMessageRef.current;
-  
+        
           if (stoppedMessage && stoppedMessage.trim()) {
+            lastStoppedAssistantMessageRef.current = stoppedMessage;
+        
             setMessages((prev) => [
               ...prev,
               {
@@ -318,10 +322,11 @@ const handleFinish = useCallback((message) => {
               },
             ]);
           }
-  
+        
           streamingMessageRef.current = "";
           setStreamingMessage("");
-        } else {
+        }
+        else {
           setUploadError(error.message);
           setMessages((prev) =>
             prev.map((msg, idx) =>
@@ -394,6 +399,137 @@ const handleFinish = useCallback((message) => {
       setUploadError("再送できる元のメッセージが見つかりませんでした。");
     },
     [messages, handleSendMessage]
+  );
+
+  const handleContinueGeneration = useCallback(
+    async (messageIndex) => {
+      const stoppedMessage = messages[messageIndex];
+  
+      if (!stoppedMessage || stoppedMessage.role !== "assistant" || !stoppedMessage.stopped) {
+        return;
+      }
+  
+      const { text, file } = lastSubmittedRequestRef.current;
+      const stoppedAssistantText =
+        lastStoppedAssistantMessageRef.current || stoppedMessage.content || "";
+  
+      if ((!text || !text.trim()) && !file) {
+        setUploadError("続きを生成する元の送信内容が見つかりませんでした。");
+        return;
+      }
+  
+      if (!stoppedAssistantText.trim()) {
+        setUploadError("続きを生成する元の回答が見つかりませんでした。");
+        return;
+      }
+  
+      if (isStreaming) {
+        return;
+      }
+  
+      if (!isOnline) {
+        setUploadError("オフラインです。インターネット接続を確認してください。");
+        return;
+      }
+  
+      setUploadError("");
+  
+      try {
+        setIsStreaming(true);
+        setStreamingMessage("");
+        streamingMessageRef.current = "";
+        abortControllerRef.current = new AbortController();
+  
+        const baseMessages = messages
+          .slice(0, messageIndex)
+          .filter((m) => m.status === "done")
+          .map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+  
+        const continuePrompt = {
+          role: "user",
+          content:
+            "直前の回答の続きを、日本語で自然につなげて出力してください。すでに出力した文章はできるだけ繰り返さないでください。",
+        };
+  
+        const requestMessages = [
+          ...baseMessages,
+          {
+            role: "assistant",
+            content: stoppedAssistantText,
+          },
+          continuePrompt,
+        ];
+  
+        const formData = new FormData();
+        formData.append("model", selectedModel);
+        formData.append("messages", JSON.stringify(requestMessages));
+        formData.append("stream", "true");
+  
+        if (file) {
+          formData.append("file", file);
+        }
+  
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          body: formData,
+          signal: abortControllerRef.current.signal,
+        });
+  
+        if (!response.ok) {
+          let errorMessage = `HTTP error! status: ${response.status}`;
+  
+          try {
+            const errorData = await response.json();
+            if (errorData?.error) {
+              errorMessage = errorData.error;
+            }
+          } catch {
+            // JSONで読めないときは既定メッセージのまま
+          }
+  
+          throw new Error(errorMessage);
+        }
+  
+        await handleStreamResponse(response);
+        setStreamingMessage("");
+      } catch (error) {
+        console.error("Continue generation error:", error);
+  
+        if (error.name === "AbortError") {
+          const stoppedContinuation = streamingMessageRef.current;
+  
+          if (stoppedContinuation && stoppedContinuation.trim()) {
+            lastStoppedAssistantMessageRef.current = stoppedContinuation;
+  
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: stoppedContinuation,
+                status: "done",
+                stopped: true,
+                timestamp: new Date().toLocaleTimeString("ja-JP", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              },
+            ]);
+          }
+  
+          streamingMessageRef.current = "";
+          setStreamingMessage("");
+        } else {
+          setUploadError(error.message);
+        }
+      } finally {
+        abortControllerRef.current = null;
+        setIsStreaming(false);
+      }
+    },
+    [messages, selectedModel, isStreaming, isOnline, handleStreamResponse]
   );
 
   // メッセージ削除
@@ -672,28 +808,42 @@ const handleFinish = useCallback((message) => {
 
               {/* 停止後の表示はバブルの外に出す */}
               {message.stopped && (
-              <div className="mt-3">
-                <div className="inline-flex items-center gap-3 rounded-lg border border-[#3A3A46] bg-[#181821] px-3 py-2 shadow-sm">
-                  <span className="text-xs font-poppins text-[#F3B37A]">
-                    回答を停止しました
-                  </span>
+                <div className="mt-3">
+                  <div className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-[#3A3A46] bg-[#181821] px-3 py-2 shadow-sm">
+                    <span className="text-xs font-poppins text-[#F3B37A]">
+                      回答を停止しました
+                    </span>
 
-                  <button
-                    type="button"
-                    onClick={() => handleRetryStopped(idx)}
-                    disabled={isStreaming}
-                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-poppins font-medium transition-all duration-200 ${
-                      isStreaming
-                        ? "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
-                        : "bg-[#614BFF] text-white hover:bg-[#553DE8] active:bg-[#4B35CC]"
-                    }`}
-                  >
-                    <RotateCcw size={12} />
-                    再送
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRetryStopped(idx)}
+                      disabled={isStreaming}
+                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-poppins font-medium transition-all duration-200 ${
+                        isStreaming
+                          ? "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
+                          : "bg-[#614BFF] text-white hover:bg-[#553DE8] active:bg-[#4B35CC]"
+                      }`}
+                    >
+                      <RotateCcw size={12} />
+                      再送
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleContinueGeneration(idx)}
+                      disabled={isStreaming}
+                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-poppins font-medium transition-all duration-200 ${
+                        isStreaming
+                          ? "bg-[#2A2A36] text-[#67676D] cursor-not-allowed opacity-40"
+                          : "bg-[#1F3A5F] text-[#D9ECFF] hover:bg-[#2A4B78] active:bg-[#18314F]"
+                      }`}
+                    >
+                      <Sparkles size={12} />
+                      続きから生成
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
             </div>
           </div>
         ))}
