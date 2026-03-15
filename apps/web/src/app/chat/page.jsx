@@ -37,6 +37,14 @@ import {
 } from "@/utils/conversationStorage";
 
 export default function ChatPage() {
+  const createMessageId = () => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  };
+
   const [conversations, setConversations] = useState(() => {
     const loaded = loadConversations();
     return loaded.length > 0 ? loaded : [createConversation()];
@@ -87,6 +95,7 @@ export default function ChatPage() {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -98,6 +107,8 @@ export default function ChatPage() {
     file: null,
   });
   const lastStoppedAssistantMessageRef = useRef("");
+  const sendLockRef = useRef(false);
+  const attachmentCacheRef = useRef(new Map());
 
   const MAX_CHARS = 10000;
 
@@ -113,7 +124,14 @@ export default function ChatPage() {
     (!!inputText.trim() || !!selectedFile) &&
     !isOverLimit &&
     !isStreaming &&
+    !isSubmitting &&
     isOnline;
+
+  const composerStatusText = isStreaming
+    ? "AIが回答を生成中です。必要なら停止できます。"
+    : selectedFile
+      ? "添付ファイルを含めて送信します。"
+      : "Enterで送信、Shift + Enterで改行できます。";
 
   const filteredConversations = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
@@ -130,9 +148,13 @@ export default function ChatPage() {
   }, [conversations, searchText]);
 
   const formatConversationUpdatedAt = useCallback((isoString) => {
-    if (!isoString) return "";
+    if (!isoString) return "日時なし";
   
     const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) {
+      return "日時なし";
+    }
+  
     const now = new Date();
   
     const isSameDay =
@@ -317,7 +339,14 @@ export default function ChatPage() {
   });
 
   const createUserMessage = useCallback((text, file) => {
+    const messageId = createMessageId();
+
+    if (file) {
+      attachmentCacheRef.current.set(messageId, file);
+    }
+
     return {
+      id: messageId,
       role: "user",
       content: text.trim() || "ファイルを送信しました",
       status: "sending",
@@ -327,6 +356,7 @@ export default function ChatPage() {
       }),
       fileName: file ? file.name : "",
       fileSize: file ? file.size : 0,
+      attachmentId: file ? messageId : "",
     };
   }, []);
 
@@ -345,7 +375,7 @@ export default function ChatPage() {
 
       setUploadError("");
 
-      if (isCurrentOverLimit || isStreaming) {
+      if (isCurrentOverLimit || isStreaming || sendLockRef.current) {
         return;
       }
 
@@ -357,6 +387,9 @@ export default function ChatPage() {
       if (!textToSend.trim() && !fileToSend) {
         return;
       }
+
+      sendLockRef.current = true;
+      setIsSubmitting(true);
 
       lastSubmittedRequestRef.current = {
         text: textToSend,
@@ -473,6 +506,8 @@ export default function ChatPage() {
         }
       } finally {
         abortControllerRef.current = null;
+        sendLockRef.current = false;
+        setIsSubmitting(false);
         setIsStreaming(false);
       }
     },
@@ -484,6 +519,7 @@ export default function ChatPage() {
       handleStreamResponse,
       inputText,
       isOnline,
+      isSubmitting,
       isStreaming,
       selectedFile,
       selectedModel,
@@ -500,12 +536,33 @@ export default function ChatPage() {
         return;
       }
 
+      const cachedFile = failedMessage.attachmentId
+        ? attachmentCacheRef.current.get(failedMessage.attachmentId)
+        : undefined;
+
+      if (failedMessage.fileName && !cachedFile) {
+        setUploadError(
+          "ファイル付きメッセージの再送には、もう一度ファイルを選び直してください。"
+        );
+        setInputText(failedMessage.content || "");
+        return;
+      }
+
       updateConversationMessages(activeConversationId, (prev) =>
         prev.filter((_, idx) => idx !== messageIndex)
       );
-      handleSendMessage(failedMessage.content, undefined, activeConversationId);
+      handleSendMessage(
+        failedMessage.content,
+        cachedFile,
+        activeConversationId
+      );
     },
-    [messages, activeConversationId, updateConversationMessages, handleSendMessage]
+    [
+      messages,
+      activeConversationId,
+      updateConversationMessages,
+      handleSendMessage,
+    ]
   );
 
   const handleRetryStopped = useCallback(
@@ -696,11 +753,16 @@ export default function ChatPage() {
 
   const handleDeleteMessage = useCallback(
     (messageIndex) => {
+      const message = messages[messageIndex];
+      if (message?.attachmentId) {
+        attachmentCacheRef.current.delete(message.attachmentId);
+      }
+
       updateConversationMessages(activeConversationId, (prev) =>
         prev.filter((_, idx) => idx !== messageIndex)
       );
     },
-    [activeConversationId, updateConversationMessages]
+    [activeConversationId, messages, updateConversationMessages]
   );
 
   const handleStopGeneration = useCallback(() => {
@@ -715,6 +777,9 @@ export default function ChatPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+
+    sendLockRef.current = false;
+    setIsSubmitting(false);
 
     const newConversation = createConversation();
     setConversations((prev) => [newConversation, ...prev]);
@@ -731,6 +796,9 @@ export default function ChatPage() {
         abortControllerRef.current = null;
       }
 
+      sendLockRef.current = false;
+      setIsSubmitting(false);
+
       setActiveConversationId(conversationId);
       resetTransientUi();
     },
@@ -744,6 +812,12 @@ export default function ChatPage() {
 
       const ok = window.confirm(`「${target.title}」を削除しますか？`);
       if (!ok) return;
+
+      target.messages.forEach((message) => {
+        if (message.attachmentId) {
+          attachmentCacheRef.current.delete(message.attachmentId);
+        }
+      });
 
       const nextConversations = conversations.filter(
         (conversation) => conversation.id !== conversationId
@@ -775,8 +849,34 @@ export default function ChatPage() {
     }
   }, [inputText]);
 
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const validAttachmentIds = new Set();
+
+    conversations.forEach((conversation) => {
+      conversation.messages.forEach((message) => {
+        if (message.attachmentId) {
+          validAttachmentIds.add(message.attachmentId);
+        }
+      });
+    });
+
+    attachmentCacheRef.current.forEach((_, key) => {
+      if (!validAttachmentIds.has(key)) {
+        attachmentCacheRef.current.delete(key);
+      }
+    });
+  }, [conversations]);
+
   return (
-    <div className="flex h-screen bg-gradient-to-br from-[#0E0E10] to-[#1A1B25]">
+    <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(97,75,255,0.22),_transparent_28%),linear-gradient(135deg,_#0E0E10_0%,_#171822_55%,_#111117_100%)]">
       {/* サイドバー */}
       <div
         className={`${
@@ -919,7 +1019,7 @@ export default function ChatPage() {
       </div>
 
       {/* メイン */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="relative flex flex-col flex-1 min-w-0">
         {!isOnline && (
           <div className="bg-[#FF5656] text-white px-4 py-2 flex items-center justify-center gap-2 text-sm font-poppins">
             <WifiOff size={16} />
@@ -956,6 +1056,11 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-2 rounded-full border border-[#2F3240] bg-[#151720] px-3 py-1 text-xs text-[#B8C0D9]">
+              {isOnline ? <Wifi size={12} className="text-[#35D57F]" /> : <WifiOff size={12} className="text-[#FF5656]" />}
+              <span>{isOnline ? "接続良好" : "オフライン"}</span>
+            </div>
+
             <div className="flex items-center gap-2">
               <label
                 htmlFor="model-select"
@@ -972,22 +1077,9 @@ export default function ChatPage() {
               >
                 <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-5.4">gpt-5.4</option>
               </select>
             </div>
-
-            <button
-              onClick={handleCreateNewConversation}
-              disabled={isStreaming}
-              className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg border transition-all duration-200 text-sm md:text-base ${
-                isStreaming
-                  ? "bg-[#2A2A36] border-[#353538] text-[#67676D] cursor-not-allowed opacity-40"
-                  : "bg-gradient-to-b from-[#252528] to-[#1E1E21] border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D]"
-              }`}
-              aria-label="新規チャット"
-            >
-              <Plus size={16} strokeWidth={2} />
-              <span className="hidden md:inline">新規チャット</span>
-            </button>
           </div>
         </div>
 
@@ -995,8 +1087,9 @@ export default function ChatPage() {
         <div
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6"
+          className="flex-1 overflow-y-auto px-4 md:px-6 py-6"
         >
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-6">
           {messages.length === 0 && !streamingMessage && (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
               <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-r from-[#614BFF] to-[#8360FF] rounded-full flex items-center justify-center mb-6">
@@ -1008,6 +1101,26 @@ export default function ChatPage() {
               <p className="font-poppins text-[#8B8B90] text-sm md:text-base max-w-md mb-6">
                 AIアシスタントがあなたの質問にお答えします。下のボックスからメッセージを送信してください。
               </p>
+              <div className="mb-6 grid w-full max-w-3xl gap-3 text-left md:grid-cols-3">
+                <div className="rounded-2xl border border-[#2A2C38] bg-[#161821]/90 p-4">
+                  <p className="text-sm font-poppins font-medium text-white">見やすい会話管理</p>
+                  <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">
+                    会話一覧、検索、自動タイトル生成で、複数チャットでも迷いにくいUIです。
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#2A2C38] bg-[#161821]/90 p-4">
+                  <p className="text-sm font-poppins font-medium text-white">安定した送信処理</p>
+                  <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">
+                    ストリーミング中の停止、再送、ファイル付き送信を同じ画面で扱えます。
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#2A2C38] bg-[#161821]/90 p-4">
+                  <p className="text-sm font-poppins font-medium text-white">初心者向け導線</p>
+                  <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">
+                    Enter送信、Shift + Enter改行、対応ファイル形式を画面内で案内しています。
+                  </p>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2 justify-center">
                 {["プログラミングのヘルプ", "文章の校正", "アイデア出し"].map(
                   (suggestion, idx) => (
@@ -1261,6 +1374,7 @@ export default function ChatPage() {
           )}
 
           <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {showScrollButton && (
@@ -1319,7 +1433,21 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div className="bg-[#262630] border border-[#353538] rounded-xl p-3 md:p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#2B2F3E] bg-[#141722] px-4 py-3 text-xs text-[#A9B2C8]">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#1F2432] px-3 py-1 text-[#E7EAEE]">
+                  <Sparkles size={12} className="text-[#A99BFF]" />
+                  {selectedModel}
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#1B1E28] px-3 py-1">
+                  <span className="h-2 w-2 rounded-full bg-[#35D57F]"></span>
+                  {composerStatusText}
+                </span>
+              </div>
+              <span className="text-[#7F879A]">対応ファイル: txt / md</span>
+            </div>
+
+            <div className="bg-[#262630] border border-[#353538] rounded-xl p-3 md:p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
               <textarea
                 ref={textareaRef}
                 value={inputText}
@@ -1389,9 +1517,9 @@ export default function ChatPage() {
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={isStreaming}
+                        disabled={isStreaming || isSubmitting}
                         className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-poppins transition-all duration-200 ${
-                          isStreaming
+                          isStreaming || isSubmitting
                             ? "bg-[#2A2A36] border-[#353538] text-[#67676D] cursor-not-allowed opacity-40"
                             : "bg-[#1F1F26] border-[#353538] text-[#F4F4F5] hover:bg-[#2E2E31] hover:text-white active:bg-[#1A1A1D]"
                         }`}
@@ -1409,7 +1537,13 @@ export default function ChatPage() {
                         }`}
                       >
                         <Send size={14} />
-                        <span>{selectedFile ? "ファイル送信" : "送信"}</span>
+                        <span>
+                          {isSubmitting
+                            ? "送信準備中..."
+                            : selectedFile
+                              ? "ファイル送信"
+                              : "送信"}
+                        </span>
                       </button>
                     </>
                   )}
