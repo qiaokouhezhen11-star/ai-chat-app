@@ -66,6 +66,10 @@ export default function ChatPage() {
   const abortControllerRef = useRef(null);
   const textareaRef = useRef(null);
   const streamingMessageRef = useRef("");
+  const lastSubmittedRequestRef = useRef({
+    text: "",
+    file: null,
+  });
 
   const MAX_CHARS = 10000;
   
@@ -196,26 +200,38 @@ const handleFinish = useCallback((message) => {
 
   // メッセージ送信
   const handleSendMessage = useCallback(
-    async (overrideText) => {
+    async (overrideText, overrideFile) => {
       const textToSend =
         typeof overrideText === "string" ? overrideText : inputText;
-
+  
+      const fileToSend =
+        typeof overrideFile !== "undefined" ? overrideFile : selectedFile;
+  
+      const currentCharCount = textToSend.length;
+      const isCurrentOverLimit = currentCharCount > MAX_CHARS;
+  
       setUploadError("");
-
-      if (isOverLimit || isStreaming) {
+  
+      if (isCurrentOverLimit || isStreaming) {
         return;
       }
-
+  
       if (!isOnline) {
         setUploadError("オフラインです。インターネット接続を確認してください。");
         return;
       }
-
-      if (!textToSend.trim() && !selectedFile) {
+  
+      if (!textToSend.trim() && !fileToSend) {
         return;
       }
   
-      const userMessage = createUserMessage(textToSend, selectedFile);
+      // 直前に送った内容を保持しておく
+      lastSubmittedRequestRef.current = {
+        text: textToSend,
+        file: fileToSend,
+      };
+  
+      const userMessage = createUserMessage(textToSend, fileToSend);
   
       setMessages((prev) => [...prev, userMessage]);
   
@@ -235,6 +251,8 @@ const handleFinish = useCallback((message) => {
         );
   
         setIsStreaming(true);
+        setStreamingMessage("");
+        streamingMessageRef.current = "";
         abortControllerRef.current = new AbortController();
   
         const requestMessages = [
@@ -250,8 +268,8 @@ const handleFinish = useCallback((message) => {
         formData.append("messages", JSON.stringify(requestMessages));
         formData.append("stream", "true");
   
-        if (selectedFile) {
-          formData.append("file", selectedFile);
+        if (fileToSend) {
+          formData.append("file", fileToSend);
         }
   
         const response = await fetch("/api/chat", {
@@ -284,7 +302,7 @@ const handleFinish = useCallback((message) => {
   
         if (error.name === "AbortError") {
           const stoppedMessage = streamingMessageRef.current;
-        
+  
           if (stoppedMessage && stoppedMessage.trim()) {
             setMessages((prev) => [
               ...prev,
@@ -300,11 +318,10 @@ const handleFinish = useCallback((message) => {
               },
             ]);
           }
-        
+  
           streamingMessageRef.current = "";
           setStreamingMessage("");
-        }
-        else {
+        } else {
           setUploadError(error.message);
           setMessages((prev) =>
             prev.map((msg, idx) =>
@@ -321,14 +338,12 @@ const handleFinish = useCallback((message) => {
     },
     [
       inputText,
-      isOverLimit,
       isOnline,
       isStreaming,
       messages,
       selectedModel,
       selectedFile,
       handleStreamResponse,
-      streamingMessage,
       handleClearFile,
       createUserMessage,
     ]
@@ -347,6 +362,30 @@ const handleFinish = useCallback((message) => {
       handleSendMessage(failedMessage.content);
     },
     [messages, handleSendMessage],
+  );
+
+  // 停止後の再送
+  const handleRetryStopped = useCallback(
+    (messageIndex) => {
+      const stoppedMessage = messages[messageIndex];
+  
+      if (!stoppedMessage || stoppedMessage.role !== "assistant" || !stoppedMessage.stopped) {
+        return;
+      }
+  
+      // 停止メッセージの直前にある user メッセージを探す
+      for (let i = messageIndex - 1; i >= 0; i -= 1) {
+        const prevMessage = messages[i];
+  
+        if (prevMessage.role === "user") {
+          handleSendMessage(prevMessage.content);
+          return;
+        }
+      }
+  
+      setUploadError("再送できる元のメッセージが見つかりませんでした。");
+    },
+    [messages, handleSendMessage]
   );
 
   // メッセージ削除
@@ -510,16 +549,16 @@ const handleFinish = useCallback((message) => {
 
               {/* メッセージバブル */}
               <div
-                className={`px-4 py-3 rounded-2xl font-poppins text-sm md:text-base leading-relaxed ${message.role === "user"
-                  ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white"
-                  : "bg-[#1F1F26] text-white border border-[#353538]"
-                  }`}
+                className={`px-4 py-3 rounded-2xl font-poppins text-sm md:text-base leading-relaxed ${
+                  message.role === "user"
+                    ? "bg-gradient-to-r from-[#614BFF] to-[#8360FF] text-white"
+                    : "bg-[#1F1F26] text-white border border-[#353538]"
+                }`}
               >
                 <div className="break-words">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
-                      // インラインコードは code() で整形
                       code({ inline, children, ...props }) {
                         if (inline) {
                           return (
@@ -531,15 +570,12 @@ const handleFinish = useCallback((message) => {
                             </code>
                           );
                         }
-                        // ブロックコードは pre() 側で包むので、ここでは素の code を返す
                         return <code {...props}>{children}</code>;
                       },
-
-                      // コードブロック（``` ```）は pre() が呼ばれるので、ここでコピーUIを付ける
                       pre({ children }) {
-                        // children は <code>…</code> が入ってくる想定
                         const codeText =
-                          (children?.props?.children && String(children.props.children).replace(/\n$/, "")) ||
+                          (children?.props?.children &&
+                            String(children.props.children).replace(/\n$/, "")) ||
                           "";
 
                         return (
@@ -560,9 +596,7 @@ const handleFinish = useCallback((message) => {
                               </button>
                             </div>
 
-                            <pre className="p-3 overflow-x-auto">
-                              {children}
-                            </pre>
+                            <pre className="p-3 overflow-x-auto">{children}</pre>
                           </div>
                         );
                       },
@@ -570,27 +604,23 @@ const handleFinish = useCallback((message) => {
                   >
                     {message.content || ""}
                   </ReactMarkdown>
+
                   {message.role === "user" && message.fileName && (
-                  <div className="mt-3 pt-3 border-t border-white border-opacity-20">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-white text-opacity-90">
-                    <span
-                      className={`rounded-md px-2 py-1 ${getFileBadgeClassName(message.fileName)}`}
-                    >
-                      {message.fileName.split(".").pop()?.toUpperCase() || "FILE"}
-                    </span>
-                      <span className="break-all">{message.fileName}</span>
-                      <span className="text-white text-opacity-70">
-                        {formatFileSize(message.fileSize)}
-                      </span>
+                    <div className="mt-3 pt-3 border-t border-white border-opacity-20">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-white text-opacity-90">
+                        <span
+                          className={`rounded-md px-2 py-1 ${getFileBadgeClassName(message.fileName)}`}
+                        >
+                          {message.fileName.split(".").pop()?.toUpperCase() || "FILE"}
+                        </span>
+                        <span className="break-all">{message.fileName}</span>
+                        <span className="text-white text-opacity-70">
+                          {formatFileSize(message.fileSize)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}        
+                  )}
                 </div>
-                {message.stopped && (
-                  <div className="mt-2 pt-2 border-t border-[#353538] text-xs text-[#8B8B90] italic">
-                    途中で停止されました
-                  </div>
-                )}
 
                 {/* 状態表示 */}
                 {message.status === "sending" && (
@@ -631,6 +661,23 @@ const handleFinish = useCallback((message) => {
                   </div>
                 )}
               </div>
+
+              {/* 停止後の表示はバブルの外に出す */}
+              {message.stopped && (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="text-xs text-[#8B8B90] italic">
+                    途中で停止されました
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRetryStopped(idx)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#614BFF] hover:bg-[#553DE8] active:bg-[#4B35CC] text-white transition-colors duration-200 text-xs"
+                  >
+                    <RotateCcw size={12} />
+                    再送
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}
