@@ -99,6 +99,12 @@ UI
 → ストリーミングレスポンスを受信  
 → UIへ逐次反映
 
+詳細は以下の設計資料にまとめています。
+
+- [Architecture](docs/architecture.md)
+- [Prompt Design](docs/prompt-design.md)
+- [Known Issues](docs/knownissues.md)
+
 ## 工夫したポイント
 
 ### 1. ストリーミングによるUX改善
@@ -171,6 +177,29 @@ AIアプリでは、精度だけでなく待ち時間の体感も重要です。
 - 認証機能の追加
 - モバイル表示の最適化
 - 会話の並び替えやピン留め
+
+## スクリーンショット
+
+チャット画面のスクリーンショットは `docs/screenshots` 配下に配置する想定です。  
+READMEに掲載する場合は、次のように参照できます。
+
+```md
+![チャット画面](docs/screenshots/chat-page.png)
+```
+
+ローカルで開発サーバー起動後、ブラウザを開かずにPNGを書き出す場合は次を実行します。
+
+```bash
+npm run screenshot:chat
+```
+
+必要に応じてURLや出力先は環境変数で上書きできます。
+
+```bash
+CHAT_SCREENSHOT_URL=http://127.0.0.1:3000/chat \
+CHAT_SCREENSHOT_OUTPUT=docs/screenshots/chat-page.png \
+npm run screenshot:chat
+```
 
 ## セットアップ
 

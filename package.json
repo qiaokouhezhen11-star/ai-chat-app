@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "screenshot:chat": "CHAT_SCREENSHOT_URL=${CHAT_SCREENSHOT_URL:-http://127.0.0.1:3000/chat} CHAT_SCREENSHOT_OUTPUT=${CHAT_SCREENSHOT_OUTPUT:-docs/screenshots/chat-page.png} swift scripts/capture-chat-screenshot.swift"
+  },
   "dependencies": {
     "pdfjs-dist": "^5.5.207"
   }
