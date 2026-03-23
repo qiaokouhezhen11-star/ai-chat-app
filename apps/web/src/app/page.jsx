@@ -1,4 +1,5 @@
+import { Navigate } from "react-router";
 
 export default function Page() {
-  return null;
+  return <Navigate to="/chat" replace />;
 }
